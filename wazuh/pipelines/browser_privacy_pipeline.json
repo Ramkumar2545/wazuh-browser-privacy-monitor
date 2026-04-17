@@ -1,61 +1,14 @@
 {
-  "description": "Browser Privacy Monitor Phase 3 - Sensitive Field Protection Pipeline",
+  "_comment": "Wazuh Indexer Ingest Pipeline — Browser Privacy Monitor Phase 3",
+  "_author": "Ram Kumar G (IT Fortress)",
+  "_version": "1.0.0",
+  "_description": "Layer 2 protection: even if a raw value slips past endpoint redaction, this pipeline removes or masks high-risk fields at the indexer ingestion stage.",
 
-  "_readme": [
-    "========================================================================",
-    "WHERE TO APPLY THIS PIPELINE",
-    "========================================================================",
-    "",
-    "Wazuh uses Filebeat to forward alerts from the Manager to the Indexer.",
-    "Filebeat already runs its own pipeline called:",
-    "  filebeat-7.10.2-wazuh-alerts-pipeline",
-    "",
-    "The pipeline file that controls this lives on the WAZUH MANAGER at:",
-    "  /usr/share/filebeat/module/wazuh/alerts/ingest/pipeline.json",
-    "",
-    "CORRECT METHOD (Method A — Recommended):",
-    "  1. Back up the existing file:",
-    "       cp /usr/share/filebeat/module/wazuh/alerts/ingest/pipeline.json \\",
-    "          /usr/share/filebeat/module/wazuh/alerts/ingest/pipeline.json.bak",
-    "",
-    "  2. Add the processors from this file into Filebeat's pipeline.json,",
-    "     inside the existing 'processors' array — before the final remove blocks.",
-    "",
-    "  3. Reload the pipeline into the Indexer:",
-    "       filebeat setup --pipelines --modules wazuh",
-    "     Expected output: 'Loaded Ingest pipelines'",
-    "",
-    "  4. Verify it loaded:",
-    "       curl -u admin:PASSWORD -k \\",
-    "         'https://localhost:9200/_ingest/pipeline/filebeat-7.10.2-wazuh-alerts-pipeline' \\",
-    "         | python3 -m json.tool | grep -A5 url_redacted",
-    "",
-    "OPTIONAL METHOD (Method B — Separate pipeline via API):",
-    "  Only needed if you want a completely separate pipeline as extra hardening.",
-    "  DO NOT apply as default_pipeline to wazuh-alerts-4.x-* — it will conflict.",
-    "",
-    "  Strip _readme and _comment keys first, then:",
-    "    python3 -c \"",
-    "      import json,sys",
-    "      d=json.load(open('browser_privacy_pipeline.json'))",
-    "      c={k:v for k,v in d.items() if not k.startswith('_')}",
-    "      c['processors']=[{k2:v2 for k2,v2 in p.items() if k2!='_comment'} for p in c['processors']]",
-    "      print(json.dumps(c,indent=2))\" > /tmp/pipeline_clean.json",
-    "",
-    "    curl -u admin:PASSWORD -k \\",
-    "      -X PUT 'https://localhost:9200/_ingest/pipeline/browser-privacy-monitor' \\",
-    "      -H 'Content-Type: application/json' \\",
-    "      -d @/tmp/pipeline_clean.json",
-    "",
-    "NOTE: Layer 1 (endpoint redaction) already protects 99% of sensitive values.",
-    "This pipeline is optional Layer 2 hardening — a safety net only.",
-    "========================================================================"
-  ],
-
+  "description": "Browser Privacy Monitor - Sensitive Field Protection Pipeline",
   "processors": [
 
     {
-      "_comment": "Strip URL fragment — fragments can silently carry tokens (e.g. #access_token=...)",
+      "_comment": "Remove fragment from url_redacted if present (fragments can carry tokens)",
       "gsub": {
         "field": "data.url_redacted",
         "pattern": "#.*$",
@@ -66,16 +19,16 @@
     },
 
     {
-      "_comment": "Catch any high-entropy token (64+ chars) that slipped past endpoint redaction in url_redacted",
+      "_comment": "Hash any url_redacted that still contains a potential token (64-char hex or 32+ base64)",
       "script": {
         "lang": "painless",
-        "source": "if (ctx.data != null && ctx.data.url_redacted != null) { def url = ctx.data.url_redacted; def tokenPattern = /[A-Za-z0-9+\\/_~\\-]{64,}/; if (tokenPattern.matcher(url).find()) { ctx.data.url_redacted = '[PIPELINE-MASKED: high-entropy value detected]'; ctx.data.pipeline_masked = true; } }",
+        "source": "if (ctx.data != null && ctx.data.url_redacted != null) { def url = ctx.data.url_redacted; def tokenPattern = /[A-Za-z0-9+\\/._~\\-]{64,}/; if (tokenPattern.matcher(url).find()) { ctx.data.url_redacted = '[PIPELINE-MASKED: high-entropy value detected]'; ctx.data.pipeline_masked = true; } }",
         "ignore_failure": true
       }
     },
 
     {
-      "_comment": "Hard-drop any raw URL fields if they accidentally appear — should never happen after Layer 1",
+      "_comment": "Ensure sensitive raw URL fields never get indexed — drop them if present",
       "remove": {
         "field": ["data.url", "data.full_url", "data.raw_url"],
         "ignore_missing": true,
@@ -84,7 +37,7 @@
     },
 
     {
-      "_comment": "Hard-drop any raw title fields if they accidentally appear",
+      "_comment": "Ensure raw title fields never get indexed",
       "remove": {
         "field": ["data.title", "data.page_title", "data.raw_title"],
         "ignore_missing": true,
@@ -93,7 +46,7 @@
     },
 
     {
-      "_comment": "Normalise risk_score to integer so Wazuh Dashboard range filters work correctly",
+      "_comment": "Normalise risk_score to integer for range queries",
       "convert": {
         "field": "data.risk_score",
         "type": "integer",
@@ -103,7 +56,7 @@
     },
 
     {
-      "_comment": "Normalise sensitive_detected to boolean for dashboard filter accuracy",
+      "_comment": "Normalise sensitive_detected to boolean",
       "convert": {
         "field": "data.sensitive_detected",
         "type": "boolean",
@@ -113,7 +66,7 @@
     },
 
     {
-      "_comment": "Audit flag — marks documents that passed through this pipeline",
+      "_comment": "Set a pipeline_processed flag for audit purposes",
       "set": {
         "field": "data.pipeline_processed",
         "value": true,
@@ -121,5 +74,19 @@
       }
     }
 
+  ],
+
+  "_install_instructions": [
+    "PUT _ingest/pipeline/browser-privacy-monitor",
+    "Then reference in index template or use as default pipeline for wazuh-alerts-*",
+    "",
+    "Wazuh Indexer API call:",
+    "curl -u admin:PASSWORD -k -X PUT https://INDEXER:9200/_ingest/pipeline/browser-privacy-monitor",
+    "  -H 'Content-Type: application/json'",
+    "  -d @browser_privacy_pipeline.json",
+    "",
+    "Apply to existing index:",
+    "PUT /wazuh-alerts-4.x-*/_settings",
+    "{ \"index.default_pipeline\": \"browser-privacy-monitor\" }"
   ]
 }
