@@ -1,0 +1,92 @@
+{
+  "_comment": "Wazuh Indexer Ingest Pipeline — Browser Privacy Monitor Phase 3",
+  "_author": "Ram Kumar G (IT Fortress)",
+  "_version": "1.0.0",
+  "_description": "Layer 2 protection: even if a raw value slips past endpoint redaction, this pipeline removes or masks high-risk fields at the indexer ingestion stage.",
+
+  "description": "Browser Privacy Monitor - Sensitive Field Protection Pipeline",
+  "processors": [
+
+    {
+      "_comment": "Remove fragment from url_redacted if present (fragments can carry tokens)",
+      "gsub": {
+        "field": "data.url_redacted",
+        "pattern": "#.*$",
+        "replacement": "#[fragment-removed]",
+        "ignore_missing": true,
+        "ignore_failure": true
+      }
+    },
+
+    {
+      "_comment": "Hash any url_redacted that still contains a potential token (64-char hex or 32+ base64)",
+      "script": {
+        "lang": "painless",
+        "source": "if (ctx.data != null && ctx.data.url_redacted != null) { def url = ctx.data.url_redacted; def tokenPattern = /[A-Za-z0-9+\\/._~\\-]{64,}/; if (tokenPattern.matcher(url).find()) { ctx.data.url_redacted = '[PIPELINE-MASKED: high-entropy value detected]'; ctx.data.pipeline_masked = true; } }",
+        "ignore_failure": true
+      }
+    },
+
+    {
+      "_comment": "Ensure sensitive raw URL fields never get indexed — drop them if present",
+      "remove": {
+        "field": ["data.url", "data.full_url", "data.raw_url"],
+        "ignore_missing": true,
+        "ignore_failure": true
+      }
+    },
+
+    {
+      "_comment": "Ensure raw title fields never get indexed",
+      "remove": {
+        "field": ["data.title", "data.page_title", "data.raw_title"],
+        "ignore_missing": true,
+        "ignore_failure": true
+      }
+    },
+
+    {
+      "_comment": "Normalise risk_score to integer for range queries",
+      "convert": {
+        "field": "data.risk_score",
+        "type": "integer",
+        "ignore_missing": true,
+        "ignore_failure": true
+      }
+    },
+
+    {
+      "_comment": "Normalise sensitive_detected to boolean",
+      "convert": {
+        "field": "data.sensitive_detected",
+        "type": "boolean",
+        "ignore_missing": true,
+        "ignore_failure": true
+      }
+    },
+
+    {
+      "_comment": "Set a pipeline_processed flag for audit purposes",
+      "set": {
+        "field": "data.pipeline_processed",
+        "value": true,
+        "override": false
+      }
+    }
+
+  ],
+
+  "_install_instructions": [
+    "PUT _ingest/pipeline/browser-privacy-monitor",
+    "Then reference in index template or use as default pipeline for wazuh-alerts-*",
+    "",
+    "Wazuh Indexer API call:",
+    "curl -u admin:PASSWORD -k -X PUT https://INDEXER:9200/_ingest/pipeline/browser-privacy-monitor",
+    "  -H 'Content-Type: application/json'",
+    "  -d @browser_privacy_pipeline.json",
+    "",
+    "Apply to existing index:",
+    "PUT /wazuh-alerts-4.x-*/_settings",
+    "{ \"index.default_pipeline\": \"browser-privacy-monitor\" }"
+  ]
+}
