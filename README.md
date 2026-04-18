@@ -369,28 +369,54 @@ print(json.dumps(clean, indent=2))
 " > /tmp/browser_privacy_pipeline_clean.json
 ```
 
-#### Step 2 — Register on the Indexer
+#### Step 2 — Register the Pipeline on the Wazuh Indexer
+
+> Push the clean pipeline JSON to your Wazuh Indexer via the OpenSearch REST API.
+> Replace credentials and IP if your setup differs.
 
 ```bash
+# Wazuh Indexer: https://127.0.0.1:9200
+# Username     : admin
+# Password     : Wazuh*12345
+
 curl -u admin:Wazuh*12345 -k \
   -X PUT "https://127.0.0.1:9200/_ingest/pipeline/browser-privacy-monitor" \
   -H "Content-Type: application/json" \
   -d @/tmp/browser_privacy_pipeline_clean.json
 ```
 
-Expected: `{"acknowledged": true}`
+Expected response: `{"acknowledged": true}`
 
-#### Step 3 — Verify it registered
+---
+
+#### Step 3 — Verify the Pipeline Was Registered
+
+> Confirm the pipeline exists on the Indexer and all processors are present.
 
 ```bash
+# Wazuh Indexer: https://127.0.0.1:9200
+# Username     : admin
+# Password     : Wazuh*12345
+
 curl -u admin:Wazuh*12345 -k \
-  "https://127.0.0.1:9200/_ingest/pipeline/browser-privacy-monitor" \
+  -X GET "https://127.0.0.1:9200/_ingest/pipeline/browser-privacy-monitor" \
   | python3 -m json.tool
 ```
 
-#### Step 4 — Test with simulate API
+Expected: JSON output listing all 7 processors (`gsub`, `script`, two `remove`, two `convert`, `set`).
+
+---
+
+#### Step 4 — Test the Pipeline with the Simulate API
+
+> Dry-run the pipeline against a sample browser privacy event without indexing it.
+> Confirms redaction, type conversion, and masking all work correctly.
 
 ```bash
+# Wazuh Indexer: https://127.0.0.1:9200
+# Username     : admin
+# Password     : Wazuh*12345
+
 curl -u admin:Wazuh*12345 -k \
   -X POST "https://127.0.0.1:9200/_ingest/pipeline/browser-privacy-monitor/_simulate" \
   -H "Content-Type: application/json" \
@@ -398,7 +424,7 @@ curl -u admin:Wazuh*12345 -k \
     "docs": [{
       "_source": {
         "data": {
-          "url_redacted": "https://portal.com/reset?token=eyJhbGciOiJSUz...longtoken...longertoken...",
+          "url_redacted": "https://portal.company.com/reset?token=eyJhbGciOiJSUz...longtoken...longertoken...",
           "sensitive_detected": "true",
           "risk_score": "10"
         }
@@ -407,7 +433,14 @@ curl -u admin:Wazuh*12345 -k \
   }'
 ```
 
-Expected: `url_redacted` becomes `[PIPELINE-MASKED]`, `risk_score` becomes integer `10`, `sensitive_detected` becomes boolean `true`.
+**Expected result after pipeline runs:**
+
+| Field | Input | Output |
+|-------|-------|--------|
+| `url_redacted` | `...token=eyJhbGci...` | `[PIPELINE-MASKED: high-entropy value detected]` |
+| `risk_score` | `"10"` (string) | `10` (integer) |
+| `sensitive_detected` | `"true"` (string) | `true` (boolean) |
+| `pipeline_processed` | _(absent)_ | `true` |
 
 > **Note on `default_pipeline`:** Applying a `default_pipeline` to `wazuh-alerts-4.x-*` index settings is possible but **not recommended** — it can interfere with Filebeat's existing pipeline and cause indexing failures. Method A (injecting into Filebeat's pipeline) is always safer.
 
