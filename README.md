@@ -38,7 +38,7 @@ How the collector is packaged and run on each supported OS, with install paths, 
 
 **Windows — SYSTEM Scheduled Task**
 
-![Windows endpoint: SYSTEM Scheduled Task running the collector from C:\BrowserPrivacyMonitor\](docs/images/03-endpoint-windows.png)
+![Windows endpoint: SYSTEM Scheduled Task running the collector from C:/BrowserPrivacyMonitor/](docs/images/03-endpoint-windows.png)
 
 **Linux — systemd service**
 
