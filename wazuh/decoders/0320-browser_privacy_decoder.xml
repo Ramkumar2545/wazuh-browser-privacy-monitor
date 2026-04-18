@@ -1,112 +1,84 @@
 <!--
   Wazuh Browser Privacy Monitor — Decoder
   Author  : Ram Kumar G (IT Fortress)
-  Version : 1.1.0 (Phase 3 - Privacy-Safe Telemetry Edition)
+  Version : 1.2.0 (Phase 3 - Privacy-Safe Telemetry Edition)
 
-  DESIGN:
-    Phase 3 outputs pure JSON lines to the log file.
-    Wazuh localfile is configured with log_format="json", so Wazuh
-    automatically parses every field without needing regex decoders.
+  FIX v1.2.0:
+    - Unified decoder naming: both JSON-direct and syslog-relay paths
+      now produce decoder name "browser-privacy-monitor" so that
+      rules using <decoded_as>browser-privacy-monitor</decoded_as>
+      fire correctly regardless of how the log arrives.
 
-    FIX v1.1.0:
-      - Added primary JSON path decoder using <prematch> on "integration"
-        field so that when log_format=json is used, Wazuh routes the event
-        through our named decoder and rules can use <decoded_as>.
-      - Syslog fallback decoders retained for syslog-relay environments.
-      - Added <order> to explicitly extract all fields in syslog fallback.
+    PATH A — log_format="json" (recommended for Wazuh agent direct):
+      Wazuh parses JSON natively. The prematch decoder tags the event
+      with name "browser-privacy-monitor". The child JSON_Decoder
+      extracts all fields.
+
+    PATH B — log_format="syslog" (syslog relay / forwarded logs):
+      Syslog header is pre-decoded by Wazuh (Phase 1). The parent
+      decoder matches program_name="browser-privacy-monitor" and is
+      also named "browser-privacy-monitor" so rules see the same
+      decoder name. The child JSON_Decoder extracts all fields from
+      the syslog message body.
+
+  Localfile config — PATH A (recommended):
+    Linux/macOS:
+      <localfile>
+        <log_format>json</log_format>
+        <location>/root/.browser-privacy-monitor/browser_privacy.log</location>
+      </localfile>
+
+    Windows:
+      <localfile>
+        <log_format>json</log_format>
+        <location>C:\BrowserPrivacyMonitor\browser_privacy.log</location>
+      </localfile>
+
+  Localfile config — PATH B (syslog relay):
+    <localfile>
+      <log_format>syslog</log_format>
+      <location>/var/log/browser-privacy-monitor.log</location>
+    </localfile>
 
   JSON fields emitted by collector:
-    integration         : "browser-privacy-monitor"
-    event_type          : "browser_visit" | "service_started" | "service_stopped"
-    version             : collector version string
-    timestamp           : ISO 8601 visit time
-    endpoint            : agent hostname
-    platform            : Windows | Linux | Darwin
-    user                : OS username
-    browser             : browser name
-    browser_profile     : profile directory name
-    domain              : hostname only (never path or query)
-    sensitive_detected  : true | false
-    sensitive_type      : auth_token | session_id | password_reset | magic_link |
-                          auth_code | api_key | credential | credential_page |
-                          token | email | internal_doc | personal_query |
-                          file_download | anonymizer | cloud_storage | none
-    risk_category       : same value set as sensitive_type (cloud_storage,
-                          credential_page, anonymizer, file_download, normal_visit)
-    risk_score          : 1-10 integer
-    url_redacted        : masked URL (sensitive params replaced with ***MASKED***)
-    url_hash            : SHA-256 of original URL (for correlation only)
-    title_redacted      : masked page title
-    title_hash          : SHA-256 of original title (for correlation only)
-
-  IMPORTANT — What is NEVER in these logs:
-    - Full URL query strings
-    - Session IDs / tokens
-    - API keys / secrets
-    - Auth codes / OAuth tokens
-    - Email addresses (unless already in the domain name)
-    - Reset / magic-link tokens
-    - Internal document IDs
-
-  Localfile config for Wazuh agent (ossec.conf):
-
-  Linux/macOS:
-    <localfile>
-      <log_format>json</log_format>
-      <location>/root/.browser-privacy-monitor/browser_privacy.log</location>
-      <label key="integration">browser-privacy-monitor</label>
-    </localfile>
-
-  Windows:
-    <localfile>
-      <log_format>json</log_format>
-      <location>C:\BrowserPrivacyMonitor\browser_privacy.log</location>
-      <label key="integration">browser-privacy-monitor</label>
-    </localfile>
-
-  NOTE on log_format=json:
-    When using log_format=json, Wazuh's built-in JSON decoder fires first
-    and makes all JSON keys available as fields WITHOUT a prefix.
-    The decoder below uses <prematch> to tag the event with our decoder
-    name so that rules can use <decoded_as>browser-privacy-monitor</decoded_as>
-    for clean, reliable matching.
+    integration, event_type, version, timestamp, endpoint, platform,
+    user, browser, browser_profile, domain,
+    sensitive_detected, sensitive_type, risk_category, risk_score,
+    url_redacted, url_hash, title_redacted, title_hash
 -->
 
 <!-- ══════════════════════════════════════════════════════════════
-     PRIMARY PATH — log_format="json" (RECOMMENDED)
-     Wazuh parses the JSON natively. This decoder uses prematch on
-     the raw log line to assign our decoder name so rules can use
-     <decoded_as>browser-privacy-monitor</decoded_as>.
+     PATH A — log_format="json" (direct agent JSON ingestion)
+     prematch fires on the raw JSON line and assigns decoder name
+     "browser-privacy-monitor" so rules decoded_as matches.
      ══════════════════════════════════════════════════════════════ -->
 
 <decoder name="browser-privacy-monitor">
   <prematch>{"integration": "browser-privacy-monitor"</prematch>
 </decoder>
 
-<decoder name="browser-privacy-monitor-json">
+<decoder name="browser-privacy-monitor-fields">
   <parent>browser-privacy-monitor</parent>
   <plugin_decoder>JSON_Decoder</plugin_decoder>
 </decoder>
 
 <!-- ══════════════════════════════════════════════════════════════
-     SYSLOG RELAY FALLBACK — only needed if log_format="syslog"
-     is used instead of log_format="json".
-     Skip these decoders if using log_format="json" (recommended).
+     PATH B — log_format="syslog" (syslog relay / forwarded)
+     The syslog header is pre-decoded by Wazuh (Phase 1) and
+     program_name is extracted. This parent decoder ALSO uses name
+     "browser-privacy-monitor" (same as PATH A) so that rules with
+     <decoded_as>browser-privacy-monitor</decoded_as> fire for
+     BOTH ingestion paths without any rule duplication.
 
-     In syslog relay mode the JSON line arrives wrapped in a syslog
-     header like:
-       Apr 17 23:06:38 WIN-HOST browser-privacy-monitor: {"integration":...
-     The parent matches the program_name tag, the child strips the
-     syslog wrapper and feeds the JSON body to the JSON_Decoder.
+     Syslog line format:
+       Apr 18 10:00:00 WIN-01 browser-privacy-monitor: {"integration":...
      ══════════════════════════════════════════════════════════════ -->
 
-<!-- Syslog parent: match program_name tag -->
-<decoder name="browser-privacy-monitor-syslog">
-  <program_name>browser-privacy-monitor</program_name>
+<decoder name="browser-privacy-monitor">
+  <program_name>^browser-privacy-monitor$</program_name>
 </decoder>
 
-<!-- Syslog child: extract JSON from the syslog body -->
-<decoder name="browser-privacy-monitor-syslog-json">
-  <parent>browser-privacy-monitor-syslog</parent>
+<decoder name="browser-privacy-monitor-fields">
+  <parent>browser-privacy-monitor</parent>
   <plugin_decoder>JSON_Decoder</plugin_decoder>
 </decoder>
