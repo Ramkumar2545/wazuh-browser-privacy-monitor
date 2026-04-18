@@ -372,15 +372,24 @@ print(json.dumps(clean, indent=2))
 #### Step 2 — Register the Pipeline on the Wazuh Indexer
 
 > Push the clean pipeline JSON to your Wazuh Indexer via the OpenSearch REST API.
-> Replace credentials and IP if your setup differs.
+
+**Make sure you use your correct:**
+- **Username** — `admin`
+- **Password** — `Wazuh*12345`
+- **IP address** — your Wazuh Indexer IP (use `127.0.0.1` if running on the same node)
+
+> ⚠️ **If the IP address doesn't work**, try `localhost` or `127.0.0.1` instead.
 
 ```bash
-# Wazuh Indexer: https://127.0.0.1:9200
-# Username     : admin
-# Password     : Wazuh*12345
-
+# Option 1 — Using IP address (replace with your Wazuh Indexer IP)
 curl -u admin:Wazuh*12345 -k \
   -X PUT "https://127.0.0.1:9200/_ingest/pipeline/browser-privacy-monitor" \
+  -H "Content-Type: application/json" \
+  -d @/tmp/browser_privacy_pipeline_clean.json
+
+# Option 2 — If Option 1 fails, try with localhost
+curl -u admin:Wazuh*12345 -k \
+  -X PUT "https://localhost:9200/_ingest/pipeline/browser-privacy-monitor" \
   -H "Content-Type: application/json" \
   -d @/tmp/browser_privacy_pipeline_clean.json
 ```
@@ -393,13 +402,22 @@ Expected response: `{"acknowledged": true}`
 
 > Confirm the pipeline exists on the Indexer and all processors are present.
 
-```bash
-# Wazuh Indexer: https://127.0.0.1:9200
-# Username     : admin
-# Password     : Wazuh*12345
+**Make sure you use your correct:**
+- **Username** — `admin`
+- **Password** — `Wazuh*12345`
+- **IP address** — same as Step 2
 
+> ⚠️ **If the IP address doesn't work**, try `localhost` or `127.0.0.1` instead.
+
+```bash
+# Option 1 — Using IP address
 curl -u admin:Wazuh*12345 -k \
   -X GET "https://127.0.0.1:9200/_ingest/pipeline/browser-privacy-monitor" \
+  | python3 -m json.tool
+
+# Option 2 — If Option 1 fails, try with localhost
+curl -u admin:Wazuh*12345 -k \
+  -X GET "https://localhost:9200/_ingest/pipeline/browser-privacy-monitor" \
   | python3 -m json.tool
 ```
 
@@ -412,13 +430,33 @@ Expected: JSON output listing all 7 processors (`gsub`, `script`, two `remove`, 
 > Dry-run the pipeline against a sample browser privacy event without indexing it.
 > Confirms redaction, type conversion, and masking all work correctly.
 
-```bash
-# Wazuh Indexer: https://127.0.0.1:9200
-# Username     : admin
-# Password     : Wazuh*12345
+**Make sure you use your correct:**
+- **Username** — `admin`
+- **Password** — `Wazuh*12345`
+- **IP address** — same as Step 2
 
+> ⚠️ **If the IP address doesn't work**, try `localhost` or `127.0.0.1` instead.
+
+```bash
+# Option 1 — Using IP address
 curl -u admin:Wazuh*12345 -k \
   -X POST "https://127.0.0.1:9200/_ingest/pipeline/browser-privacy-monitor/_simulate" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "docs": [{
+      "_source": {
+        "data": {
+          "url_redacted": "https://portal.company.com/reset?token=eyJhbGciOiJSUz...longtoken...longertoken...",
+          "sensitive_detected": "true",
+          "risk_score": "10"
+        }
+      }
+    }]
+  }'
+
+# Option 2 — If Option 1 fails, try with localhost
+curl -u admin:Wazuh*12345 -k \
+  -X POST "https://localhost:9200/_ingest/pipeline/browser-privacy-monitor/_simulate" \
   -H "Content-Type: application/json" \
   -d '{
     "docs": [{
