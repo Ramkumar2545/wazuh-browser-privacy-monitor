@@ -484,6 +484,45 @@ curl -u admin:Wazuh*12345 -k \
 
 ---
 
+### Step 5 — Restart All Services After Setup
+
+> Once the pipeline simulate returns `{"acknowledged": true}` and all steps above are complete,
+> restart all Wazuh services to apply every change end-to-end.
+
+**Make sure you restart in this order — do not skip any service:**
+
+```bash
+# 1. Reload systemd unit files (picks up any service file changes)
+systemctl daemon-reload
+
+# 2. Restart Wazuh Manager (rules, decoders, ossec.conf changes)
+systemctl restart wazuh-manager
+
+# 3. Restart Wazuh Indexer (OpenSearch — pipeline registration takes effect)
+systemctl restart wazuh-indexer
+
+# 4. Restart Wazuh Dashboard (UI refresh)
+systemctl restart wazuh-dashboard
+
+# 5. Restart Filebeat (re-reads pipeline config, reconnects to Indexer)
+systemctl restart filebeat
+```
+
+**Verify all services came back up cleanly:**
+
+```bash
+systemctl status wazuh-manager  | grep -E "Active|running"
+systemctl status wazuh-indexer  | grep -E "Active|running"
+systemctl status wazuh-dashboard | grep -E "Active|running"
+systemctl status filebeat        | grep -E "Active|running"
+```
+
+All four should show `Active: active (running)` before proceeding.
+
+> ⚠️ If `wazuh-indexer` takes more than 30 seconds to start, wait and check again — OpenSearch can be slow on first restart after pipeline changes.
+
+---
+
 ### Where your Indexer address is
 
 | Setup | Use this address |
