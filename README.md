@@ -341,8 +341,8 @@ Expected output: `Loaded Ingest pipelines`
 #### Step 4 — Verify the pipeline was loaded
 
 ```bash
-curl -u admin:YOUR_PASSWORD -k \
-  "https://localhost:9200/_ingest/pipeline/filebeat-7.10.2-wazuh-alerts-pipeline" \
+curl -u admin:Wazuh*12345 -k \
+  "https://127.0.0.1:9200/_ingest/pipeline/filebeat-7.10.2-wazuh-alerts-pipeline" \
   | python3 -m json.tool | grep -A5 "url_redacted"
 ```
 
@@ -372,8 +372,8 @@ print(json.dumps(clean, indent=2))
 #### Step 2 — Register on the Indexer
 
 ```bash
-curl -u admin:YOUR_PASSWORD -k \
-  -X PUT "https://localhost:9200/_ingest/pipeline/browser-privacy-monitor" \
+curl -u admin:Wazuh*12345 -k \
+  -X PUT "https://127.0.0.1:9200/_ingest/pipeline/browser-privacy-monitor" \
   -H "Content-Type: application/json" \
   -d @/tmp/browser_privacy_pipeline_clean.json
 ```
@@ -383,16 +383,16 @@ Expected: `{"acknowledged": true}`
 #### Step 3 — Verify it registered
 
 ```bash
-curl -u admin:YOUR_PASSWORD -k \
-  "https://localhost:9200/_ingest/pipeline/browser-privacy-monitor" \
+curl -u admin:Wazuh*12345 -k \
+  "https://127.0.0.1:9200/_ingest/pipeline/browser-privacy-monitor" \
   | python3 -m json.tool
 ```
 
 #### Step 4 — Test with simulate API
 
 ```bash
-curl -u admin:YOUR_PASSWORD -k \
-  -X POST "https://localhost:9200/_ingest/pipeline/browser-privacy-monitor/_simulate" \
+curl -u admin:Wazuh*12345 -k \
+  -X POST "https://127.0.0.1:9200/_ingest/pipeline/browser-privacy-monitor/_simulate" \
   -H "Content-Type: application/json" \
   -d '{
     "docs": [{
