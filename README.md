@@ -1,10 +1,10 @@
-# Wazuh Browser Privacy Monitor — Phase 3
+# BrowserGuard for Wazuh — Privacy-Safe Browser Telemetry
 
-> **Privacy-safe browser telemetry for Wazuh SIEM**
-> Detect sensitive browsing activity. Never expose the sensitive value itself.
+> **Detect sensitive browsing activity without ever exposing the sensitive value itself.**
+> Endpoint-side redaction. SHA-256 correlation. Zero-trust logging for Wazuh SIEM.
 
 **Author:** Ram Kumar G · (https://github.com/Ramkumar2545)
-**Phase:** 3 — Privacy-Safe Telemetry Edition
+**Release:** Phase 3 — Privacy-Safe Telemetry Edition
 **Platforms:** Windows · Linux · macOS
 **Browsers:** Chrome · Edge · Brave · Firefox · Opera · OperaGX · Vivaldi · Chromium · Safari (macOS)
 
