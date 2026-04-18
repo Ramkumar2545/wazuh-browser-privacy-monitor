@@ -34,15 +34,59 @@ OSSEC_CONF="/var/ossec/etc/ossec.conf"
 REPO_RAW="https://raw.githubusercontent.com/Ramkumar2545/wazuh-browser-privacy-monitor/main"
 
 # ── Parse CLI args ─────────────────────────────────────────────────────────────
+# Supports:
+#   --interval <seconds>      e.g. --interval 300
+#   --interval <Nm|Nh|Nd>     e.g. --interval 30m, 2h, 1d
+#   --interval <1-10>         menu shortcut, same numbering as the prompt
+#   -y | --yes | --non-interactive   accept defaults, never prompt
+#   --uninstall               remove everything
+# Env vars: BPM_INTERVAL=30m   BPM_NONINTERACTIVE=1
 UNINSTALL=false
-CLI_SECS=""
+CLI_INTERVAL="${BPM_INTERVAL:-}"
+NONINTERACTIVE="${BPM_NONINTERACTIVE:-0}"
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --interval) CLI_SECS="$2"; shift 2 ;;
-        --uninstall) UNINSTALL=true; shift ;;
+        --interval=*) CLI_INTERVAL="${1#*=}"; shift ;;
+        --interval)   CLI_INTERVAL="$2"; shift 2 ;;
+        -y|--yes|--non-interactive) NONINTERACTIVE=1; shift ;;
+        --uninstall)  UNINSTALL=true; shift ;;
+        -h|--help)
+            echo "Usage: linux-installer.sh [--interval <value>] [-y|--non-interactive] [--uninstall]"
+            echo "  --interval 1..10   menu number (1=1m, 2=5m, ..., 5=30m, ..., 10=24h)"
+            echo "  --interval 300     raw seconds"
+            echo "  --interval 30m     short form (m=minutes, h=hours, d=days)"
+            echo "  -y                 non-interactive (default 30m)"
+            echo "Env vars: BPM_INTERVAL, BPM_NONINTERACTIVE"
+            exit 0
+            ;;
         *) shift ;;
     esac
 done
+
+# ── INTERVAL PARSER ───────────────────────────────────────────────────────────
+parse_interval() {
+    local v="$1"
+    [ -z "$v" ] && v="5"
+    case "$v" in
+        1)  SECS=60;    LABEL="1m"  ;;
+        2)  SECS=300;   LABEL="5m"  ;;
+        3)  SECS=600;   LABEL="10m" ;;
+        4)  SECS=1200;  LABEL="20m" ;;
+        5)  SECS=1800;  LABEL="30m" ;;
+        6)  SECS=3600;  LABEL="60m" ;;
+        7)  SECS=7200;  LABEL="2h"  ;;
+        8)  SECS=21600; LABEL="6h"  ;;
+        9)  SECS=43200; LABEL="12h" ;;
+        10) SECS=86400; LABEL="24h" ;;
+        *[0-9]m) SECS=$(( ${v%m} * 60 ));    LABEL="$v" ;;
+        *[0-9]h) SECS=$(( ${v%h} * 3600 ));  LABEL="$v" ;;
+        *[0-9]d) SECS=$(( ${v%d} * 86400 )); LABEL="$v" ;;
+        *[!0-9]*) SECS=1800; LABEL="30m" ;;
+        *)        SECS="$v"; LABEL="${v}s" ;;
+    esac
+    if [ "$SECS" -lt 60 ] 2>/dev/null;    then SECS=60;    LABEL="1m";  fi
+    if [ "$SECS" -gt 86400 ] 2>/dev/null; then SECS=86400; LABEL="24h"; fi
+}
 
 # ── Uninstall ─────────────────────────────────────────────────────────────────
 if $UNINSTALL; then
@@ -91,29 +135,32 @@ echo -e "     9)  12 hours"
 echo -e "    10)  24 hours   (once per day)"
 echo -e ""
 
-if [[ -n "$CLI_SECS" ]]; then
-    SECS="$CLI_SECS"
-    LABEL="custom"
-    echo -e "${GREEN}    [+] CLI interval: ${SECS}s${NC}"
-elif [ -t 0 ]; then
-    read -rp "    Enter choice [1-10] (default: 5 = 30 min): " CHOICE
-    [ -z "$CHOICE" ] && CHOICE="5"
-    case "$CHOICE" in
-        1)  SECS=60;    LABEL="1m"  ;;
-        2)  SECS=300;   LABEL="5m"  ;;
-        3)  SECS=600;   LABEL="10m" ;;
-        4)  SECS=1200;  LABEL="20m" ;;
-        5)  SECS=1800;  LABEL="30m" ;;
-        6)  SECS=3600;  LABEL="60m" ;;
-        7)  SECS=7200;  LABEL="2h"  ;;
-        8)  SECS=21600; LABEL="6h"  ;;
-        9)  SECS=43200; LABEL="12h" ;;
-        10) SECS=86400; LABEL="24h" ;;
-        *)  SECS=1800;  LABEL="30m" ;;
-    esac
+# Priority: CLI flag / env → non-interactive mode → TTY prompt → /dev/tty reopen → default
+if [[ -n "$CLI_INTERVAL" ]]; then
+    parse_interval "$CLI_INTERVAL"
+    echo -e "${GREEN}    [+] Using interval from flag/env: $LABEL ($SECS seconds)${NC}"
+elif [[ "$NONINTERACTIVE" = "1" ]]; then
+    parse_interval "5"
+    echo -e "    ${YELLOW}(Non-interactive mode: default $LABEL)${NC}"
 else
-    SECS=1800; LABEL="30m"
-    echo -e "${YELLOW}    (Non-interactive: defaulting to 30m)${NC}"
+    # /dev/tty reopen trick so 'curl ... | sudo bash' can still prompt
+    if [ -t 0 ]; then
+        PROMPT_FD=0
+    elif [ -r /dev/tty ] && [ -w /dev/tty ]; then
+        exec </dev/tty
+        PROMPT_FD=0
+    else
+        PROMPT_FD=""
+    fi
+
+    if [ -n "$PROMPT_FD" ]; then
+        read -rp "    Enter choice [1-10] (default: 5 = 30 min): " CHOICE
+        [ -z "$CHOICE" ] && CHOICE="5"
+        parse_interval "$CHOICE"
+    else
+        parse_interval "5"
+        echo -e "    ${YELLOW}(No TTY detected: defaulting to $LABEL — pass --interval or -y to override)${NC}"
+    fi
 fi
 echo -e "${GREEN}    [+] Selected: $LABEL ($SECS seconds)${NC}"
 

@@ -18,14 +18,25 @@
       1. Run as Administrator.
       2. Python 3.8+ installed System-Wide (Install for All Users + Add to PATH).
 
-.ONE-LINE INSTALL:
+.ONE-LINE INSTALL (interactive, prompts for interval):
     powershell -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; iwr -UseBasicParsing 'https://raw.githubusercontent.com/Ramkumar2545/wazuh-browser-privacy-monitor/main/install.ps1' | iex"
+
+.ONE-LINE INSTALL (non-interactive, pick interval via env var):
+    powershell -ExecutionPolicy Bypass -Command "$env:BPM_INTERVAL='30m'; [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; iwr -UseBasicParsing 'https://raw.githubusercontent.com/Ramkumar2545/wazuh-browser-privacy-monitor/main/install.ps1' | iex"
+
+.FROM DOWNLOADED FILE (supports param):
+    .\install.ps1 -Interval 30m
+    .\install.ps1 -Interval 300
+    .\install.ps1 -Interval 5           # menu number
+    .\install.ps1 -NonInteractive       # accept default 30m
 
 .UNINSTALL:
     powershell -ExecutionPolicy Bypass -File install.ps1 -Uninstall
 #>
 
 param(
+    [string]$Interval = "",
+    [switch]$NonInteractive,
     [switch]$Uninstall
 )
 
@@ -117,22 +128,7 @@ if (-not (Test-Path $PythonWExe)) { $PythonWExe = $PythonExe }
 Write-Host "    [+] Windowless Python: $PythonWExe" -ForegroundColor Green
 
 # ── STEP 2: Interval selection ────────────────────────────────────────────────
-Write-Host ""
-Write-Host "[2] Select scan interval (how often to check browser history):" -ForegroundColor Yellow
-Write-Host "     1)  1  minute   (high I/O — testing only)" -ForegroundColor Gray
-Write-Host "     2)  5  minutes" -ForegroundColor Gray
-Write-Host "     3)  10 minutes" -ForegroundColor Gray
-Write-Host "     4)  20 minutes" -ForegroundColor Gray
-Write-Host "     5)  30 minutes  (recommended)" -ForegroundColor Cyan
-Write-Host "     6)  60 minutes / 1 hour" -ForegroundColor Gray
-Write-Host "     7)  2  hours" -ForegroundColor Gray
-Write-Host "     8)  6  hours" -ForegroundColor Gray
-Write-Host "     9)  12 hours" -ForegroundColor Gray
-Write-Host "    10)  24 hours    (once per day)" -ForegroundColor Gray
-Write-Host ""
-$choice = Read-Host "    Enter choice [1-10] (default: 5 = 30 minutes)"
-if ([string]::IsNullOrWhiteSpace($choice)) { $choice = "5" }
-
+# Priority: -Interval param → $env:BPM_INTERVAL → -NonInteractive / $env:BPM_NONINTERACTIVE → prompt
 $IntervalMap = @{
     "1"  = @{ Secs = 60;    Label = "1m";  Mins = 1    }
     "2"  = @{ Secs = 300;   Label = "5m";  Mins = 5    }
@@ -145,12 +141,77 @@ $IntervalMap = @{
     "9"  = @{ Secs = 43200; Label = "12h"; Mins = 720  }
     "10" = @{ Secs = 86400; Label = "24h"; Mins = 1440 }
 }
-if (-not $IntervalMap.ContainsKey($choice)) { $choice = "5" }
-$SECS       = $IntervalMap[$choice].Secs
-$LABEL      = $IntervalMap[$choice].Label
-$MINS       = $IntervalMap[$choice].Mins
+
+function Resolve-Interval {
+    param([string]$v)
+    if ([string]::IsNullOrWhiteSpace($v)) { return $null }
+    $v = $v.Trim().ToLower()
+    if ($IntervalMap.ContainsKey($v)) {
+        return @{ Secs = $IntervalMap[$v].Secs; Label = $IntervalMap[$v].Label; Mins = $IntervalMap[$v].Mins }
+    }
+    $secs = $null
+    if     ($v -match '^([0-9]+)m$') { $secs = [int]$Matches[1] * 60 }
+    elseif ($v -match '^([0-9]+)h$') { $secs = [int]$Matches[1] * 3600 }
+    elseif ($v -match '^([0-9]+)d$') { $secs = [int]$Matches[1] * 86400 }
+    elseif ($v -match '^([0-9]+)s?$') { $secs = [int]$Matches[1] }
+    else { return $null }
+    if ($secs -lt 60)    { $secs = 60 }
+    if ($secs -gt 86400) { $secs = 86400 }
+    $mins = [Math]::Max(1, [int]($secs / 60))
+    # Prefer short label when it maps cleanly
+    $label = switch ($secs) {
+        60    { "1m" }
+        300   { "5m" }
+        600   { "10m" }
+        1200  { "20m" }
+        1800  { "30m" }
+        3600  { "60m" }
+        7200  { "2h" }
+        21600 { "6h" }
+        43200 { "12h" }
+        86400 { "24h" }
+        default { "${secs}s" }
+    }
+    return @{ Secs = $secs; Label = $label; Mins = $mins }
+}
+
+$resolved = $null
+if (-not [string]::IsNullOrWhiteSpace($Interval))           { $resolved = Resolve-Interval $Interval }
+if (-not $resolved -and $env:BPM_INTERVAL)                  { $resolved = Resolve-Interval $env:BPM_INTERVAL }
+$forceNonInteractive = $NonInteractive.IsPresent -or ($env:BPM_NONINTERACTIVE -eq "1")
+
+if ($resolved) {
+    $SECS = $resolved.Secs; $LABEL = $resolved.Label; $MINS = $resolved.Mins
+    Write-Host ""
+    Write-Host "[2] Using interval from flag/env: $LABEL ($SECS seconds)" -ForegroundColor Green
+} elseif ($forceNonInteractive) {
+    $SECS = 1800; $LABEL = "30m"; $MINS = 30
+    Write-Host ""
+    Write-Host "[2] Non-interactive mode: default $LABEL (1800 seconds)" -ForegroundColor Yellow
+} else {
+    Write-Host ""
+    Write-Host "[2] Select scan interval (how often to check browser history):" -ForegroundColor Yellow
+    Write-Host "     1)  1  minute   (high I/O — testing only)" -ForegroundColor Gray
+    Write-Host "     2)  5  minutes" -ForegroundColor Gray
+    Write-Host "     3)  10 minutes" -ForegroundColor Gray
+    Write-Host "     4)  20 minutes" -ForegroundColor Gray
+    Write-Host "     5)  30 minutes  (recommended)" -ForegroundColor Cyan
+    Write-Host "     6)  60 minutes / 1 hour" -ForegroundColor Gray
+    Write-Host "     7)  2  hours" -ForegroundColor Gray
+    Write-Host "     8)  6  hours" -ForegroundColor Gray
+    Write-Host "     9)  12 hours" -ForegroundColor Gray
+    Write-Host "    10)  24 hours    (once per day)" -ForegroundColor Gray
+    Write-Host ""
+    # Read-Host reads from the console host, so it works even through 'iwr | iex'
+    $choice = Read-Host "    Enter choice [1-10] (default: 5 = 30 minutes)"
+    if ([string]::IsNullOrWhiteSpace($choice)) { $choice = "5" }
+    if (-not $IntervalMap.ContainsKey($choice)) { $choice = "5" }
+    $SECS  = $IntervalMap[$choice].Secs
+    $LABEL = $IntervalMap[$choice].Label
+    $MINS  = $IntervalMap[$choice].Mins
+    Write-Host "    [+] Selected: $LABEL ($SECS seconds)" -ForegroundColor Green
+}
 $RepeatMins = if ($MINS -ge 1440) { "1440" } else { "$MINS" }
-Write-Host "    [+] Selected: $LABEL ($SECS seconds)" -ForegroundColor Green
 
 # ── STEP 3: Create install directory ─────────────────────────────────────────
 Write-Host ""

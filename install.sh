@@ -27,6 +27,61 @@ BLUE='\033[0;34m'; CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
 REPO_RAW="https://raw.githubusercontent.com/Ramkumar2545/wazuh-browser-privacy-monitor/main"
 OS_TYPE="$(uname -s)"
 
+# ── CLI ARGUMENT PARSING ──────────────────────────────────────────────────────
+# Supports:
+#   --interval <seconds>      e.g. --interval 300
+#   --interval <Nm|Nh|Nd>     e.g. --interval 30m, --interval 2h, --interval 1d
+#   --interval <1-10>         menu shortcut, same numbering as the prompt
+#   -y | --yes | --non-interactive   accept defaults, never prompt
+# Env-var equivalent: BPM_INTERVAL=30m  or  BPM_NONINTERACTIVE=1
+CLI_INTERVAL="${BPM_INTERVAL:-}"
+NONINTERACTIVE="${BPM_NONINTERACTIVE:-0}"
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --interval=*) CLI_INTERVAL="${1#*=}"; shift ;;
+        --interval)   CLI_INTERVAL="$2"; shift 2 ;;
+        -y|--yes|--non-interactive) NONINTERACTIVE=1; shift ;;
+        -h|--help)
+            echo "Usage: install.sh [--interval <value>] [-y|--non-interactive]"
+            echo "  --interval 1..10     menu number (1=1m, 2=5m, ..., 5=30m, ..., 10=24h)"
+            echo "  --interval 300       raw seconds"
+            echo "  --interval 30m       short form (m=minutes, h=hours, d=days)"
+            echo "  -y, --non-interactive  skip prompts and use default (30m)"
+            echo "Env vars: BPM_INTERVAL, BPM_NONINTERACTIVE"
+            exit 0
+            ;;
+        *) shift ;;  # ignore unknowns silently so 'curl | bash -s --' works
+    esac
+done
+
+# ── INTERVAL PARSER ───────────────────────────────────────────────────────────
+# Accepts:  menu number 1-10   |   raw seconds   |   30m / 2h / 1d shorthand
+# Returns via globals: SECS, LABEL
+parse_interval() {
+    local v="$1"
+    [ -z "$v" ] && v="5"
+    case "$v" in
+        1)  SECS=60;    LABEL="1m"  ;;
+        2)  SECS=300;   LABEL="5m"  ;;
+        3)  SECS=600;   LABEL="10m" ;;
+        4)  SECS=1200;  LABEL="20m" ;;
+        5)  SECS=1800;  LABEL="30m" ;;
+        6)  SECS=3600;  LABEL="60m" ;;
+        7)  SECS=7200;  LABEL="2h"  ;;
+        8)  SECS=21600; LABEL="6h"  ;;
+        9)  SECS=43200; LABEL="12h" ;;
+        10) SECS=86400; LABEL="24h" ;;
+        *[0-9]m) SECS=$(( ${v%m} * 60 ));    LABEL="$v" ;;
+        *[0-9]h) SECS=$(( ${v%h} * 3600 ));  LABEL="$v" ;;
+        *[0-9]d) SECS=$(( ${v%d} * 86400 )); LABEL="$v" ;;
+        *[!0-9]*) SECS=1800; LABEL="30m" ;;     # anything else with non-digits = default
+        *)        SECS="$v"; LABEL="${v}s" ;;    # pure digits = raw seconds
+    esac
+    # Clamp to sane range [60, 86400]
+    if [ "$SECS" -lt 60 ] 2>/dev/null;    then SECS=60;    LABEL="1m";  fi
+    if [ "$SECS" -gt 86400 ] 2>/dev/null; then SECS=86400; LABEL="24h"; fi
+}
+
 # ── Paths (OS-aware) ──────────────────────────────────────────────────────────
 if [ "$OS_TYPE" = "Darwin" ]; then
     INSTALL_DIR="$HOME/.browser-privacy-monitor"
@@ -84,27 +139,38 @@ echo -e "     9)  12 hours"
 echo -e "    10)  24 hours   (once per day)"
 echo -e ""
 
-if [ -t 0 ]; then
-    read -rp "    Enter choice [1-10] (default: 5 = 30 min): " CHOICE
+# Decide how to get the interval, in priority order:
+#   1. --interval / BPM_INTERVAL
+#   2. Interactive prompt (TTY on stdin OR /dev/tty available when piped)
+#   3. Default 30m (non-interactive fallback)
+if [ -n "$CLI_INTERVAL" ]; then
+    parse_interval "$CLI_INTERVAL"
+    echo -e "${GREEN}    [+] Using interval from flag/env: $LABEL ($SECS seconds)${NC}"
+elif [ "$NONINTERACTIVE" = "1" ]; then
+    parse_interval "5"
+    echo -e "    ${YELLOW}(Non-interactive mode: default $LABEL)${NC}"
 else
-    CHOICE="5"
-    echo -e "    ${YELLOW}(Non-interactive: defaulting to 5 = 30 minutes)${NC}"
-fi
-[ -z "$CHOICE" ] && CHOICE="5"
+    # Works for direct runs AND 'curl ... | sudo bash':
+    #   - If stdin is already a TTY, read from it.
+    #   - Else try to reopen stdin from /dev/tty so the pipe still prompts.
+    if [ -t 0 ]; then
+        PROMPT_FD=0
+    elif [ -r /dev/tty ] && [ -w /dev/tty ]; then
+        exec </dev/tty
+        PROMPT_FD=0
+    else
+        PROMPT_FD=""
+    fi
 
-case "$CHOICE" in
-    1)  SECS=60;    LABEL="1m"  ;;
-    2)  SECS=300;   LABEL="5m"  ;;
-    3)  SECS=600;   LABEL="10m" ;;
-    4)  SECS=1200;  LABEL="20m" ;;
-    5)  SECS=1800;  LABEL="30m" ;;
-    6)  SECS=3600;  LABEL="60m" ;;
-    7)  SECS=7200;  LABEL="2h"  ;;
-    8)  SECS=21600; LABEL="6h"  ;;
-    9)  SECS=43200; LABEL="12h" ;;
-    10) SECS=86400; LABEL="24h" ;;
-    *)  SECS=1800;  LABEL="30m" ;;
-esac
+    if [ -n "$PROMPT_FD" ]; then
+        read -rp "    Enter choice [1-10] (default: 5 = 30 min): " CHOICE
+        [ -z "$CHOICE" ] && CHOICE="5"
+        parse_interval "$CHOICE"
+    else
+        parse_interval "5"
+        echo -e "    ${YELLOW}(No TTY available — defaulting to $LABEL. Re-run with --interval <value> or set BPM_INTERVAL.)${NC}"
+    fi
+fi
 
 echo -e "${GREEN}    [+] Selected: $LABEL ($SECS seconds)${NC}"
 

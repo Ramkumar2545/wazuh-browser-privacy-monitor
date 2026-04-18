@@ -39,6 +39,41 @@ powershell -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::Security
 ```
 
 > The installer will **interactively ask you to choose a scan interval** during installation.
+> The prompt works even through `curl | sudo bash` — the installer reopens `/dev/tty` so you can type your answer.
+
+### Non-interactive / automated install
+
+All installers also accept a flag or environment variable so you can skip the prompt (useful for Ansible, MDM, Intune, scripts):
+
+```bash
+# Linux / macOS: pick the interval via flag
+curl -sSL https://raw.githubusercontent.com/Ramkumar2545/wazuh-browser-privacy-monitor/main/install.sh | sudo bash -s -- --interval 30m
+curl -sSL https://raw.githubusercontent.com/Ramkumar2545/wazuh-browser-privacy-monitor/main/install.sh | sudo bash -s -- --interval 300
+curl -sSL https://raw.githubusercontent.com/Ramkumar2545/wazuh-browser-privacy-monitor/main/install.sh | sudo bash -s -- -y    # accept default 30m
+
+# Or via environment variable:
+BPM_INTERVAL=2h sudo -E bash -c "$(curl -sSL https://raw.githubusercontent.com/Ramkumar2545/wazuh-browser-privacy-monitor/main/install.sh)"
+```
+
+```powershell
+# Windows (Admin PowerShell): pick the interval via env var
+$env:BPM_INTERVAL='30m'
+powershell -ExecutionPolicy Bypass -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; iwr -UseBasicParsing 'https://raw.githubusercontent.com/Ramkumar2545/wazuh-browser-privacy-monitor/main/install.ps1' | iex"
+
+# Or from a downloaded file:
+.\install.ps1 -Interval 30m
+.\install.ps1 -NonInteractive   # accept default 30m
+```
+
+**Accepted `--interval` / `-Interval` / `BPM_INTERVAL` values:**
+
+| Form | Examples | Meaning |
+|------|----------|---------|
+| Menu number | `1`, `5`, `10` | Matches the prompt (1 = 1m, 5 = 30m, 10 = 24h) |
+| Short form | `30m`, `2h`, `1d` | Human-readable |
+| Raw seconds | `60`, `300`, `1800` | Clamped to `[60, 86400]` |
+
+**Non-interactive switches:** `-y` / `--non-interactive` (shell), `-NonInteractive` (PowerShell), or `BPM_NONINTERACTIVE=1`.
 
 ---
 

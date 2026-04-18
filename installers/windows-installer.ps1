@@ -13,10 +13,18 @@
     Set-ExecutionPolicy Bypass -Scope Process -Force
     .\installers\windows-installer.ps1
     .\installers\windows-installer.ps1 -Interval 300
+    .\installers\windows-installer.ps1 -Interval 30m
+    .\installers\windows-installer.ps1 -Interval 5       # menu number
+    .\installers\windows-installer.ps1 -NonInteractive   # accept default 30m
     .\installers\windows-installer.ps1 -Uninstall
+
+.ENV VARS
+    $env:BPM_INTERVAL = '30m'
+    $env:BPM_NONINTERACTIVE = '1'
 #>
 param(
-    [int]$Interval = 0,
+    [string]$Interval = "",
+    [switch]$NonInteractive,
     [switch]$Uninstall
 )
 
@@ -74,10 +82,46 @@ $PythonWExe = Join-Path $PyDir "pythonw.exe"
 if (-not (Test-Path $PythonWExe)) { $PythonWExe = $PythonExe }
 Write-Host "    [+] $PythonWExe" -ForegroundColor Green
 
-# Step 2: Interval
-if ($Interval -gt 0) {
-    $SECS = $Interval; $LABEL = "${Interval}s"; $MINS = [Math]::Max(1, [int]($Interval / 60))
-    Write-Host "[2] CLI interval: ${SECS}s" -ForegroundColor Green
+# Step 2: Interval selection
+# Priority: -Interval param → $env:BPM_INTERVAL → -NonInteractive / $env:BPM_NONINTERACTIVE → prompt
+$map = @{"1"=@{S=60;L="1m";M=1};"2"=@{S=300;L="5m";M=5};"3"=@{S=600;L="10m";M=10};
+         "4"=@{S=1200;L="20m";M=20};"5"=@{S=1800;L="30m";M=30};"6"=@{S=3600;L="60m";M=60};
+         "7"=@{S=7200;L="2h";M=120};"8"=@{S=21600;L="6h";M=360};"9"=@{S=43200;L="12h";M=720};
+         "10"=@{S=86400;L="24h";M=1440}}
+
+function Resolve-Interval {
+    param([string]$v)
+    if ([string]::IsNullOrWhiteSpace($v)) { return $null }
+    $v = $v.Trim().ToLower()
+    if ($map.ContainsKey($v)) { return @{ S = $map[$v].S; L = $map[$v].L; M = $map[$v].M } }
+    $secs = $null
+    if     ($v -match '^([0-9]+)m$') { $secs = [int]$Matches[1] * 60 }
+    elseif ($v -match '^([0-9]+)h$') { $secs = [int]$Matches[1] * 3600 }
+    elseif ($v -match '^([0-9]+)d$') { $secs = [int]$Matches[1] * 86400 }
+    elseif ($v -match '^([0-9]+)s?$') { $secs = [int]$Matches[1] }
+    else { return $null }
+    if ($secs -lt 60)    { $secs = 60 }
+    if ($secs -gt 86400) { $secs = 86400 }
+    $mins  = [Math]::Max(1, [int]($secs / 60))
+    $label = switch ($secs) {
+        60 {"1m"} 300 {"5m"} 600 {"10m"} 1200 {"20m"} 1800 {"30m"}
+        3600 {"60m"} 7200 {"2h"} 21600 {"6h"} 43200 {"12h"} 86400 {"24h"}
+        default { "${secs}s" }
+    }
+    return @{ S = $secs; L = $label; M = $mins }
+}
+
+$resolved = $null
+if (-not [string]::IsNullOrWhiteSpace($Interval)) { $resolved = Resolve-Interval $Interval }
+if (-not $resolved -and $env:BPM_INTERVAL)        { $resolved = Resolve-Interval $env:BPM_INTERVAL }
+$forceNonInteractive = $NonInteractive.IsPresent -or ($env:BPM_NONINTERACTIVE -eq "1")
+
+if ($resolved) {
+    $SECS = $resolved.S; $LABEL = $resolved.L; $MINS = $resolved.M
+    Write-Host "[2] Using interval from flag/env: $LABEL ($SECS seconds)" -ForegroundColor Green
+} elseif ($forceNonInteractive) {
+    $SECS = 1800; $LABEL = "30m"; $MINS = 30
+    Write-Host "[2] Non-interactive mode: default $LABEL (1800 seconds)" -ForegroundColor Yellow
 } else {
     Write-Host ""
     Write-Host "[2] Select scan interval:" -ForegroundColor Yellow
@@ -94,10 +138,6 @@ if ($Interval -gt 0) {
     Write-Host ""
     $ch = Read-Host "    Enter choice [1-10] (default: 5)"
     if ([string]::IsNullOrWhiteSpace($ch)) { $ch = "5" }
-    $map = @{"1"=@{S=60;L="1m";M=1};"2"=@{S=300;L="5m";M=5};"3"=@{S=600;L="10m";M=10};
-             "4"=@{S=1200;L="20m";M=20};"5"=@{S=1800;L="30m";M=30};"6"=@{S=3600;L="60m";M=60};
-             "7"=@{S=7200;L="2h";M=120};"8"=@{S=21600;L="6h";M=360};"9"=@{S=43200;L="12h";M=720};
-             "10"=@{S=86400;L="24h";M=1440}}
     if (-not $map.ContainsKey($ch)) { $ch = "5" }
     $SECS = $map[$ch].S; $LABEL = $map[$ch].L; $MINS = $map[$ch].M
     Write-Host "    [+] Selected: $LABEL ($SECS seconds)" -ForegroundColor Green
