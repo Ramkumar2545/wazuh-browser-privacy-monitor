@@ -3,7 +3,7 @@
 > **Privacy-safe browser telemetry for Wazuh SIEM**
 > Detect sensitive browsing activity. Never expose the sensitive value itself.
 
-**Author:** Ram Kumar G · [IT Fortress](https://github.com/Ramkumar2545)
+**Author:** Ram Kumar G · (https://github.com/Ramkumar2545)
 **Phase:** 3 — Privacy-Safe Telemetry Edition
 **Platforms:** Windows · Linux · macOS
 **Browsers:** Chrome · Edge · Brave · Firefox · Opera · OperaGX · Vivaldi · Chromium · Safari (macOS)
